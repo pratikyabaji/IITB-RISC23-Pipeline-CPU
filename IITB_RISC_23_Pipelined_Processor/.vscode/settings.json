@@ -1,0 +1,14 @@
+{
+    "files.exclude": {
+        "**/*.vhd.bak": true,
+        "**/*.rpt": true,
+        "**/*.qpf": true,
+        "**/*.qsf": true,
+        "db": true,
+        "incremental_db": true,
+        "output_files": true,
+        "simulation/modelsim/": true,
+        "**/*.tcl": true,
+    }
+    
+}

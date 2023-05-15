@@ -1,0 +1,595 @@
+library ieee; -- importing ieee library
+use std.textio.all;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity IITB_RISC23 is
+    port(
+        -- clock input
+        clock: in std_logic_vector(0 downto 0);
+        carry : out std_logic_vector(0 downto 0)
+    );
+end entity IITB_RISC23;
+
+architecture working of IITB_RISC23 is
+    
+    -- components
+    component adderpc is
+        port (
+            pc_old : in std_logic_vector(15 downto 0);
+            pc_new : out std_logic_vector(15 downto 0)
+        );
+    end component adderpc;
+    
+    component alu is
+        port(
+            -- ALU input
+            alu_a: in std_logic_vector(15 downto 0);
+            alu_b: in std_logic_vector(15 downto 0);
+    
+            -- ALU output
+            alu_c: out std_logic_vector(15 downto 0);
+    
+            -- To select alu operation
+            alu_ir: in std_logic_vector(1 downto 0);
+    
+            -- Carry
+            carry_out : out std_logic
+      
+        );
+    end component alu ;
+    
+    component b_complement is 
+        port(cmp_ip : in std_logic_vector(15 downto 0);
+             cmp_op : out std_logic_vector(15 downto 0)
+             );
+    end component b_complement;
+    
+    component carry_zero_flag is
+        port(
+            alu_op  : in std_logic_vector(15 downto 0);
+            carry_in : in std_logic;
+    
+            -- Carry and Zero flag write enble;
+            zero_en : in std_logic; 
+            carry_en : in std_logic; 
+    
+            -- Carry and Zero flag
+            zero_flag  : out std_logic;
+            carry_flag : out std_logic;
+    
+            -- Clock
+            clock : in std_logic
+        );
+    end component carry_zero_flag;
+    
+    component data_memory is
+        port(
+            -- reading memory data
+            read_addr : in std_logic_vector(15 downto 0);
+            read_data : out std_logic_vector(15 downto 0);
+    
+            -- writting memory data 
+            write_addr : in std_logic_vector(15 downto 0);
+            write_data : in std_logic_vector(15 downto 0);
+    
+            -- write enable
+            write_en    : in std_logic;
+            -- Clock 
+            clock  : in std_logic -- clock
+        );
+    end component data_memory;
+    
+    component ir_memory is
+        port(
+            -- PC input
+            pc_input: in std_logic_vector(15 downto 0);
+    
+            -- IR output
+            ir      : out std_logic_vector(15 downto 0) 
+        );
+    end component ir_memory;
+    
+    component ir_decoder is
+        port(
+            -- IR input
+            ir_in : in std_logic_vector(15 downto 0);
+    
+            -- Decoded output
+            ir_op_opcode: out std_logic_vector(3 downto 0);
+            ir_op_ra: out std_logic_vector(2 downto 0);
+            ir_op_rb: out std_logic_vector(2 downto 0);
+            ir_op_rc: out std_logic_vector(2 downto 0);
+            ir_op_complement: out std_logic;
+            ir_op_carry_zero: out std_logic_vector(1 downto 0);
+    
+            ir_op_imm6: out std_logic_vector(5 downto 0);
+            ir_op_imm9: out std_logic_vector(8 downto 0)
+        );
+    end component ir_decoder;
+    
+    component register_file is
+        port(
+            -- 3 address-input line inputs
+            reg_a1 : in std_logic_vector(2 downto 0);
+            reg_a2 : in std_logic_vector(2 downto 0);
+            reg_a3 : in std_logic_vector(2 downto 0);
+    
+            -- register write enable
+            reg_en : in std_logic_vector(7 downto 0);
+            
+            -- 1 data-input line input
+            reg_d3 : in std_logic_vector(15 downto 0);
+            
+            -- 2 data-output line output
+            reg_d1 : out std_logic_vector(15 downto 0);
+            reg_d2 : out std_logic_vector(15 downto 0);
+            
+            -- PC update
+            pc_in : in std_logic_vector(15 downto 0);
+            pc_out : out std_logic_vector(15 downto 0);
+            
+            -- clock 
+            clock  : in std_logic; -- clock
+    
+            -- register reset
+            reset  : in std_logic
+        );
+    end component register_file;
+    
+    component sign_7_extender is 
+        port(se_ip_7 : in std_logic_vector(6 downto 0);
+             se_op_7 : out std_logic_vector(15 downto 0)
+             );
+    end component sign_7_extender;
+    
+    component sign_10_extender is 
+        port(se_ip_10 : in std_logic_vector(5 downto 0);
+             se_op_10 : out std_logic_vector(15 downto 0)
+             );
+    end component sign_10_extender;
+
+    -- Pieline Regisers
+    component pipeline_reg1 is
+        port(
+            -- inputs
+            p1_ir_in: in std_logic_vector(15 downto 0);
+            -- p1_opcode_in:in std_logic_vector(3 downto 0);
+            -- p1_complement_in:in std_logic;
+            -- p1_cz_in: in std_logic_vector(1 downto 0);
+            
+            -- outputs
+            p1_ir_out: out std_logic_vector(15 downto 0);
+            -- p1_opcode_out:out std_logic_vector(3 downto 0);
+            -- p1_complement_out:out std_logic;
+            -- p1_cz_out: out std_logic_vector(1 downto 0);
+    
+            -- enable
+            p1_en   : in std_logic;
+            -- clock
+            clock   : in std_logic
+    
+        );
+    end component pipeline_reg1;
+    
+    component pipeline_reg2 is
+        port(
+            -- inputs
+            p2_ra_in: in std_logic_vector(2 downto 0);
+            p2_rb_in: in std_logic_vector(2 downto 0);
+            p2_rc_in: in std_logic_vector(2 downto 0);
+            p2_opcode_in:in std_logic_vector(3 downto 0);
+            p2_complement_in:in std_logic;
+            p2_cz_in: in std_logic_vector(1 downto 0);
+            
+            -- outputs
+            p2_ra_out: in std_logic_vector(2 downto 0);
+            p2_rb_out: in std_logic_vector(2 downto 0);
+            p2_rc_out: in std_logic_vector(2 downto 0);
+            p2_opcode_out:out std_logic_vector(3 downto 0);
+            p2_complement_out:out std_logic;
+            p2_cz_out: out std_logic_vector(1 downto 0);
+    
+            -- enable
+            p2_en   : in std_logic;
+            -- clock
+            clock   : in std_logic
+    
+        );
+    end component pipeline_reg2;
+    
+    component pipeline_reg3 is
+        port(
+            -- inputs
+            p3_rc_in: in std_logic_vector(2 downto 0);
+            p3_rf_d1_in: in std_logic_vector(15 downto 0);
+            p3_rf_d2_in: in std_logic_vector(15 downto 0);
+            p3_opcode_in:in std_logic_vector(3 downto 0);
+            p3_complement_in:in std_logic;
+            p3_cz_in: in std_logic_vector(1 downto 0);
+            p2_se7_in: in std_logic_vector(15 downto 0);
+            p2_se10_in: in std_logic_vector(15 downto 0);
+            
+            -- outputs
+            p3_rc_out: out std_logic_vector(2 downto 0);
+            p3_rf_d1_out: out std_logic_vector(15 downto 0);
+            p3_rf_d2_out: out std_logic_vector(15 downto 0);
+            p3_opcode_out:out std_logic_vector(3 downto 0);
+            p3_complement_out:out std_logic;
+            p3_cz_out: out std_logic_vector(1 downto 0);
+            p2_se7_out: out std_logic_vector(15 downto 0);
+            p2_se10_out: out std_logic_vector(15 downto 0);
+    
+            -- enable
+            p3_en   : in std_logic;
+            -- clock
+            clock   : in std_logic
+    
+        );
+    end component pipeline_reg3;
+    
+    component pipeline_reg4 is
+        port(
+            -- inputs
+            p4_rc_in: in std_logic_vector(2 downto 0);
+            p4_alu_c_in: in std_logic_vector(15 downto 0);
+            p4_opcode_in:in std_logic_vector(3 downto 0);
+            p4_complement_in:in std_logic;
+            p4_cz_in: in std_logic_vector(1 downto 0);
+            
+            -- outputs
+            p4_rc_out: out std_logic_vector(2 downto 0);
+            p4_alu_c_out: out std_logic_vector(15 downto 0);
+            p4_opcode_out:out std_logic_vector(3 downto 0);
+            p4_complement_out:out std_logic;
+            p4_cz_out: out std_logic_vector(1 downto 0);
+    
+            -- enable
+            p4_en   : in std_logic;
+            -- clock
+            clock   : in std_logic
+    
+        );
+    end component pipeline_reg4;
+    
+    component pipeline_reg5 is
+        port(
+            -- inputs
+            p5_rc_in: in std_logic_vector(2 downto 0);
+            p5_alu_c_in: in std_logic_vector(15 downto 0);
+            p5_opcode_in:in std_logic_vector(3 downto 0);
+            p5_complement_in:in std_logic;
+            p5_cz_in: in std_logic_vector(1 downto 0);
+            
+            -- outputs
+            p5_rc_out: out std_logic_vector(2 downto 0);
+            p5_alu_c_out: out std_logic_vector(15 downto 0);
+            p5_opcode_out:out std_logic_vector(3 downto 0);
+            p5_complement_out:out std_logic;
+            p5_cz_out: out std_logic_vector(1 downto 0);
+    
+            -- enable
+            p5_en   : in std_logic;
+            -- clock
+            clock   : in std_logic
+    
+        );
+    end component pipeline_reg5;
+
+    signal pc_input, pc_output, ir_output, se_7_output, se_10_output,p1_ir_output : std_logic_vector(15 downto 0);
+    signal ir_opcode_output : std_logic_vector(3 downto 0);
+    signal ir_ra_output, ir_rb_output, ir_rc_output : std_logic_vector(2 downto 0);
+    signal ir_complement_output : std_logic;
+    signal ir_carry_zero_output : std_logic_vector(1 downto 0);
+    signal ir_imm6_output : std_logic_vector(5 downto 0);
+    signal ir_imm9_output : std_logic_vector(8 downto 0); 
+
+    
+    signal p2_ra_output , p2_rb_output , p2_rc_output : std_logic_vector(2 downto 0);
+    signal p2_opcode_output : std_logic_vector(3 downto 0);
+    signal p2_complement_output : std_logic;
+    signal p2_cz_output : std_logic_vector(1 downto 0);
+    signal p2_se7_output , p2_se10_output :std_logic_vector(15 downto 0);
+
+    signal p3_rc_output : std_logic_vector(2 downto 0);
+    signal p3_opcode_output : std_logic_vector(3 downto 0);
+    signal p3_complement_output : std_logic;
+    signal p3_cz_output : std_logic_vector(1 downto 0);
+    signal p3_rf_d1_output , p3_rf_d2_output :std_logic_vector(15 downto 0);
+
+    signal p4_rc_output : std_logic_vector(2 downto 0);
+    signal p4_opcode_output : std_logic_vector(3 downto 0);
+    signal p4_complement_output : std_logic;
+    signal p4_cz_output : std_logic_vector(1 downto 0);
+    signal p4_alu_c_output :std_logic_vector(15 downto 0);
+
+    signal p5_rc_output : std_logic_vector(2 downto 0);
+    signal p5_opcode_output : std_logic_vector(3 downto 0);
+    signal p5_complement_output : std_logic;
+    signal p5_cz_output : std_logic_vector(1 downto 0);
+    signal p5_alu_c_output :std_logic_vector(15 downto 0);
+
+    signal reg_d1_output, reg_d2_output : std_logic_vector(15 downto 0); 
+    
+    signal alu1_c_output : std_logic_vector(15 downto 0):
+    signal alu_carry : std_logic;
+    signal zero_flag, carry_flag: std_logic;
+
+begin
+    carry(0) <= carry_flag;
+    inst_adderpc:adderpc
+    port map(
+        pc_old => pc_output, 
+        pc_new => pc_input
+    );
+    
+    inst_alu:alu
+    port map(
+        -- ALU input
+        alu_a =>p3_rf_d1_output,
+        alu_b =>p3_rf_d2_output,
+
+        -- ALU output
+        alu_c =>alu1_c_output,
+
+        -- To select alu operation
+        alu_ir => '00',
+
+        -- Carry
+        carry_out  => alu_carry
+    );
+
+    -- inst_b_complement:b_complement
+    -- port map(
+    --     cmp_ip =>,
+    --     cmp_op =>
+    -- );
+    
+    inst_carry_zero_flag:carry_zero_flag
+    port map(
+        alu_op  =>alu1_c_output,
+        carry_in =>alu_carry,
+
+        -- Carry and Zero flag write enble;
+        zero_en =>p3_cz_output(0), 
+        carry_en =>p3_cz_output(1), 
+
+        -- Carry and Zero flag
+        zero_flag  => zero_flag,
+        carry_flag => carry_flag,
+
+        -- Clock
+        clock    =>  clock(0)
+    );
+
+    -- inst_data_memory:data_memory
+    -- port map(
+    --     -- reading memory data
+    --     read_addr =>,
+    --     read_data =>,
+
+    --     -- writting memory data 
+    --     write_addr =>,
+    --     write_data =>,
+
+    --     -- write enable
+    --     write_en    =>,
+    --     -- Clock 
+    --     clock    =>  clock -- clock
+    -- );
+
+    inst_ir_memory:ir_memory
+    port map(
+        -- PC input
+        pc_input => pc_output,
+
+        -- IR output
+        ir       => ir_output
+    );
+
+    inst_ir_decoder:ir_decoder
+    port map(
+        -- IR input
+        ir_in => ir_output,
+
+        -- Decoded output
+        ir_op_opcode =>ir_opcode_output,
+        ir_op_ra =>ir_ra_output,
+        ir_op_rb =>ir_rb_output,
+        ir_op_rc =>ir_rc_output,
+        ir_op_complement =>ir_complement_output
+        ir_op_carry_zero =>ir_carry_zero_output,
+
+        ir_op_imm6 =>ir_imm6_output,
+        ir_op_imm9 =>ir_imm9_output
+    );
+
+    inst_register_file:register_file
+    port map(
+        -- 3 address-input line inputs
+        reg_a1 =>p2_ra_output,
+        reg_a2 =>p2_rb_output,
+        reg_a3 =>p5_rc_output,
+
+        -- register write enable
+        reg_en =>"11111111",
+        
+        -- 1 data-input line input
+        reg_d3 =>p5_alu_c_output,
+        
+        -- 2 data-output line output
+        reg_d1 =>reg_d1_output,
+        reg_d2 =>reg_d2_output,
+        
+        -- PC update
+        pc_in =>pc_input,
+        pc_out =>pc_output,
+        
+        -- clock 
+        clock    =>  clock(0), -- clock
+
+        -- register reset
+        reset  => '0'
+    );
+
+    inst_se7:sign_7_extender
+    port map(
+        se_ip_7 =>ir_imm9_output,
+        se_op_7 =>se_7_output
+    );
+
+    inst_se10:sign_10_extender
+    port map(
+        se_ip_10 =>ir_imm6_output,
+        se_op_10 =>se_10_output
+    );
+
+    -- Pieline Regisers
+    inst_pipeline_reg1:pipeline_reg1
+    port map(
+        -- inputs
+        p1_ir_in => ir_output,
+        -- p1_opcode_in =>,
+        -- p1_complement_in =>,
+        -- p1_cz_in =>,
+        
+        -- outputs
+        p1_ir_out => p1_ir_output,
+        -- p1_opcode_out =>,
+        -- p1_complement_out =>,
+        -- p1_cz_out =>,
+        
+        -- enable
+        p1_en    => '1',
+        -- clock
+        clock    =>  clock(0)
+    );
+
+    inst_pipeline_reg2:pipeline_reg2
+    port map(
+        -- inputs
+        p2_ra_in =>ir_ra_output,
+        p2_rb_in =>ir_rb_output,
+        p2_rc_in =>ir_rc_output,
+        p2_opcode_in =>ir_opcode_output,
+        p2_complement_in =>ir_complement_output,
+        p2_cz_in =>ir_carry_zero_output,
+        p2_se7_in => se_7_output,
+        p2_se10_in => se_10_output,
+        
+        -- outputs
+        p2_ra_out =>p2_ra_output,
+        p2_rb_out =>p2_rb_output,
+        p2_rc_out =>p2_rc_output,
+        p2_opcode_out =>p2_opcode_output,
+        p2_complement_out =>p2_complement_output,
+        p2_cz_out =>p2_cz_output,
+        p2_se7_out => p2_se7_output,
+        p2_se10_out => p2_se10_output,
+
+ 
+        -- enable
+        p2_en    =>'1',
+        -- clock
+        clock    =>  clock(0)
+    );
+
+    inst_pipeline_reg3:pipeline_reg3
+    port map(
+        -- inputs
+        p3_rc_in =>p2_rc_output,
+        p3_rf_d1_in =>reg_d1_output,
+        p3_rf_d2_in =>reg_d2_output,
+        p3_opcode_in =>p2_opcode_output,
+        p3_complement_in =>p2_complement_output,
+        p3_cz_in =>p2_cz_output,
+        
+        -- outputs
+        p3_rc_out =>p3_rc_output,
+        p3_rf_d1_out =>p3_rf_d1_output,
+        p3_rf_d2_out =>p3_rf_d2_output,
+        p3_opcode_out =>p3_opcode_output,
+        p3_complement_out =>p3_complement_output,
+        p3_cz_out =>p2_cz_output,
+
+        -- enable
+        p3_en    =>'1',
+        -- clock
+        clock    =>  clock(0)
+
+    );
+
+    inst_pipeline_reg4:pipeline_reg4
+    port map(
+        -- inputs
+        p4_rc_in =>p3_rc_output,
+        p4_alu_c_in =>alu1_c_output,
+        p4_opcode_in =>p3_opcode_output,
+        p4_complement_in =>p3_complement_output,
+        p4_cz_in =>p2_cz_output,
+        
+        -- outputs
+        p4_rc_out =>p4_rc_output,
+        p4_alu_c_out =>p4_alu_c_output,
+        p4_opcode_out =>p4_opcode_output,
+        p4_complement_out =>p4_complement_output,
+        p4_cz_out =>p4_cz_output,
+
+        -- enable
+        p4_en    =>'1',
+        -- clock
+        clock    =>  clock(0)
+    );
+
+    inst_pipeline_reg5:pipeline_reg5
+    port map(
+        -- inputs
+        p5_rc_in =>p4_rc_output,
+        p5_alu_c_in =>p4_alu_c_output,
+        p5_opcode_in =>p4_opcode_output,
+        p5_complement_in =>p4_complement_output,
+        p5_cz_in =>p4_cz_output,
+        
+        -- outputs
+        p5_rc_out =>p5_rc_output,
+        p5_alu_c_out =>p5_alu_c_output,
+        p5_opcode_out =>p5_opcode_output,
+        p5_complement_out =>p5_complement_output,
+        p5_cz_out =>p5_cz_output,
+
+        -- enable
+        p5_en    =>'1',
+        -- clock
+        clock    =>  clock(0)
+    );
+    
+    write_reg_output:process(clock)
+    begin
+        if (falling_edge(clock)) then
+            write(output_file, "Register PC: ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 1 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 2 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 3 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 4 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 5 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 6 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+            write(output_file, "Register 7 : ");
+            write(output_file, std_logic_vector(reg_out));
+            write(output_file, line);
+        end if;
+    end process write_reg_output;
+end architecture working;
